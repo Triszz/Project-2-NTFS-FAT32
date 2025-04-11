@@ -57,7 +57,7 @@ class DiskAnalyzerApp:
         main_pane.add(right_pane)
 
         # Metadata panel (top 30%)
-        info_frame = ttk.LabelFrame(right_pane, text="Properties")
+        info_frame = ttk.LabelFrame(right_pane, text="Metadata")
         right_pane.add(info_frame, height=200, sticky='nsew') # Tự động co giãn theo tỷ lệ khi resize cửa sổ
 
         self.info_text = tk.Text(info_frame, wrap=tk.WORD, font=('Consolas', 10))
@@ -95,9 +95,9 @@ class DiskAnalyzerApp:
             # Thêm log để kiểm tra giá trị
             print(f"Trying to access: \\\\.\\{self.current_partition}")
                 
-            if FAT32.check_fat32(self.current_partition):
+            if FAT32.is_fat32(self.current_partition):
                 self.current_fs = FAT32(self.current_partition)
-            elif NTFS.check_ntfs(self.current_partition):
+            elif NTFS.is_ntfs(self.current_partition):
                 self.current_fs = NTFS(self.current_partition)
             else:
                 messagebox.showerror("Error", "Unsupported filesystem")
@@ -111,7 +111,7 @@ class DiskAnalyzerApp:
     def populate_tree(self, path=''):
         self.tree.delete(*self.tree.get_children())
         try:
-            entries = self.current_fs.get_dir(path)
+            entries = self.current_fs.list_directory(path)
             for entry in entries:
                 name = entry['Name']
                 if entry.get('Size', 0) == 0:  # Directory
@@ -129,7 +129,7 @@ class DiskAnalyzerApp:
             self.tree.delete(children[0])
             parent_path = self.get_full_path(node)
             try:
-                entries = self.current_fs.get_dir(parent_path)
+                entries = self.current_fs.list_directory(parent_path)
                 for entry in entries:
                     name = entry['Name']
                     if entry.get('Size', 0) == 0:
@@ -172,7 +172,7 @@ class DiskAnalyzerApp:
                 if not entry:
                     # Nếu không tìm thấy, thử truy vấn trong thư mục con
                     parent_dir = os.path.dirname(path)
-                    cdet = self.current_fs.visit_dir(parent_dir)
+                    cdet = self.current_fs.open_directory(parent_dir)
                     entry = cdet.find_entry(name)
                 
                 if entry:
@@ -196,7 +196,7 @@ class DiskAnalyzerApp:
                 record = self.current_fs.dir_tree.current_dir.find_record(name)
                 if not record:
                     parent_dir = os.path.dirname(path)
-                    next_dir = self.current_fs.visit_dir(parent_dir)
+                    next_dir = self.current_fs.open_directory(parent_dir)
                     record = next_dir.find_record(name)
                 
                 if record:
@@ -221,7 +221,7 @@ class DiskAnalyzerApp:
             # Hiển thị nội dung file (nếu không phải thư mục)
             if not is_directory:
                 try:
-                    content = self.current_fs.get_text_file(path)
+                    content = self.current_fs.read_text_file(path)
                     self.content_text.insert(tk.END, content)
                 except Exception as e:
                     self.content_text.insert(tk.END, f"Cannot display content: {str(e)}")

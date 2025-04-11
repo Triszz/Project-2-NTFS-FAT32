@@ -52,26 +52,26 @@ class RDET_entry:
         self.name = b""
         self.start_cluster = 0
         
-        self._determine_entry_type()
+        self.check_long_name_flag()
         if self.is_subentry:
-            self._process_long_name()
+            self.process_long_name()
         else:
-            self._read_attributes()
-            self._process_short_name()
+            self.read_attributes()
+            self.process_short_name()
             if not self.is_empty and not self.is_label:
-                self._parse_dates()
-                self._read_cluster_and_size()
+                self.parse_dates()
+                self.read_cluster_and_size()
 
-    def _determine_entry_type(self):
+    def check_long_name_flag(self):
         # Xác định loại entry (subentry/long name)
         self.is_subentry = self.flag == b'\x0f'
 
-    def _read_attributes(self):
+    def read_attributes(self):
         # Đọc các thuộc tính từ byte attribute
         attr_value = int.from_bytes(self.flag, byteorder='little')
         self.attr = Attribute(attr_value)
 
-    def _process_short_name(self):
+    def process_short_name(self):
         # Xử lý tên file ngắn (8.3 format)
         self.name = self.raw_data[:0x8]
         self.ext = self.raw_data[0x8:0xB]
@@ -85,7 +85,7 @@ class RDET_entry:
         if Attribute.vollable in self.attr:
             self.is_label = True
 
-    def _process_long_name(self):
+    def process_long_name(self):
         # Ghép các subentry để tạo tên file dài
         self.index = self.raw_data[0]
         self.name = b""
@@ -96,13 +96,13 @@ class RDET_entry:
                 break
         self.name = self.name.decode('utf-16le').strip('\x00')
 
-    def _parse_dates(self):
+    def parse_dates(self):
         # Phân tích các thông tin ngày tháng
-        self._parse_date_created()
-        self._parse_last_accessed()
-        self._parse_date_updated()
+        self.parse_date_created()
+        self.parse_last_accessed()
+        self.parse_date_updated()
 
-    def _parse_date_created(self):
+    def parse_date_created(self):
         # Đọc 4 byte thời gian tạo (3 byte time + 1 byte ms)
         self.time_created_raw = int.from_bytes(self.raw_data[0xD:0x10], byteorder='little')
         self.date_created_raw = int.from_bytes(self.raw_data[0x10:0x12], byteorder='little')
@@ -118,12 +118,12 @@ class RDET_entry:
 
         self.date_created = datetime(year, mon, day, h, m, s, ms*10)
 
-    def _parse_last_accessed(self):
+    def parse_last_accessed(self):
         self.last_accessed_raw = int.from_bytes(self.raw_data[0x12:0x14], 'little')
-        date = self._parse_fat_date(self.last_accessed_raw)
+        date = self.decode_fat_date(self.last_accessed_raw)
         self.last_accessed = datetime(date['year'], date['month'], date['day'])
 
-    def _parse_date_updated(self):
+    def parse_date_updated(self):
         self.time_updated_raw = int.from_bytes(self.raw_data[0x16:0x18], 'little')
         self.date_updated_raw = int.from_bytes(self.raw_data[0x18:0x1A], 'little')
 
@@ -137,7 +137,7 @@ class RDET_entry:
 
         self.date_updated = datetime(year, mon, day, h, m, s)
 
-    def _parse_fat_time(self, raw_time, include_ms=False):
+    def decode_fat_time(self, raw_time, include_ms=False):
         if include_ms:
             h = (raw_time & 0xF8000000) >> 27
             m = (raw_time & 0x07E00000) >> 21
@@ -150,13 +150,13 @@ class RDET_entry:
             s = (raw_time & 0x001F) * 2
             return {'hour': h, 'minute': m, 'second': s, 'ms': 0}
 
-    def _parse_fat_date(self, raw_date):
+    def decode_fat_date(self, raw_date):
         year = 1980 + ((raw_date & 0xFE00) >> 9)
         month = (raw_date & 0x01E0) >> 5
         day = raw_date & 0x001F
         return {'year': year, 'month': month, 'day': day}
 
-    def _read_cluster_and_size(self):
+    def read_cluster_and_size(self):
         self.start_cluster = int.from_bytes(self.raw_data[0x14:0x16][::-1] + self.raw_data[0x1A:0x1C][::-1], byteorder='big')
         self.size = int.from_bytes(self.raw_data[0x1C:0x20], byteorder='little')
 
@@ -211,7 +211,7 @@ class RDET:
         
         return f"{name}.{ext}" if ext else name
 
-    def get_active_entries(self) -> 'list[RDET_entry]':
+    def list_valid_entries(self) -> 'list[RDET_entry]':
         # Lọc các entry hợp lệ (không bị xóa, không ẩn...)
         return [
             entry for entry in self.entries 
@@ -222,7 +222,7 @@ class RDET:
     def find_entry(self, name) -> RDET_entry:
         # Tìm entry theo tên trong thư mục
         lower_name = name.lower()
-        for entry in self.get_active_entries():
+        for entry in self.list_valid_entries():
             if entry.long_name.lower() == lower_name:
                 return entry
         return None
@@ -260,7 +260,7 @@ class FAT32:
         try:
             self.boot_sector_raw = self.fd.read(0x200)
             self.boot_sector = {}
-            self.__extract_boot_sector()
+            self.parse_boot_sector()
             if self.boot_sector["FAT_type"] != b"FAT32   ":
                 raise Exception("Not FAT32")
             self.boot_sector["FAT_type"] = self.boot_sector["FAT_type"].decode()
@@ -279,7 +279,7 @@ class FAT32:
             self.DET = {}
             
             start = self.boot_sector["start_cluster_RDET"]
-            self.DET[start] = RDET(self.get_all_cluster_data(start))
+            self.DET[start] = RDET(self.read_cluster_chain(start))
             self.RDET = self.DET[start]
 
         except Exception as e:
@@ -287,7 +287,7 @@ class FAT32:
             exit()
   
     @staticmethod
-    def check_fat32(name: str):
+    def is_fat32(name: str):
         try:
             with open(r'\\.\%s' % name, 'rb') as fd:
                 fd.read(1)
@@ -298,41 +298,41 @@ class FAT32:
             print(f"[ERROR] {e}")
             exit()
 
-    def __extract_boot_sector(self):
+    def parse_boot_sector(self):
         # Trích xuất thông tin từ boot sector
-        self.boot_sector['bytes_per_sector'] = self._read_boot_sector_field(0xB, 2)
-        self.boot_sector['sectors_per_cluster'] = self._read_boot_sector_field(0xD, 1)
-        self.boot_sector['sectors_before_FAT'] = self._read_boot_sector_field(0xE, 2)
-        self.boot_sector['number_of_FAT'] = self._read_boot_sector_field(0x10, 1)
-        self.boot_sector['volume_size'] = self._read_boot_sector_field(0x20, 4)
-        self.boot_sector['sectors_per_FAT'] = self._read_boot_sector_field(0x24, 4)
-        self.boot_sector['start_cluster_RDET'] = self._read_boot_sector_field(0x2C, 4)
+        self.boot_sector['bytes_per_sector'] = self.read_boot_param(0xB, 2)
+        self.boot_sector['sectors_per_cluster'] = self.read_boot_param(0xD, 1)
+        self.boot_sector['sectors_before_FAT'] = self.read_boot_param(0xE, 2)
+        self.boot_sector['number_of_FAT'] = self.read_boot_param(0x10, 1)
+        self.boot_sector['volume_size'] = self.read_boot_param(0x20, 4)
+        self.boot_sector['sectors_per_FAT'] = self.read_boot_param(0x24, 4)
+        self.boot_sector['start_cluster_RDET'] = self.read_boot_param(0x2C, 4)
         self.boot_sector['FAT_type'] = self.boot_sector_raw[0x52:0x5A]
         self.boot_sector['start_sector_Data'] = (
             self.boot_sector['sectors_before_FAT'] + 
             self.boot_sector['number_of_FAT'] * self.boot_sector['sectors_per_FAT']
         )
 
-    def _read_boot_sector_field(self, offset, length):
+    def read_boot_param(self, offset, length):
         return int.from_bytes(
             self.boot_sector_raw[offset:offset+length], 
             byteorder='little'
         )
 
-    def __offset_from_cluster(self, index):
+    def offset_from_cluster(self, index):
         return self.SB + self.SF * self.NF + (index - 2) * self.SC
   
-    def __parse_path(self, path):
+    def parse_path(self, path):
         return re.sub(r"[/\\]+", r"\\", path).strip("\\").split("\\")
 
-    def get_cwd(self):
+    def current_path(self):
         return "\\".join(self.cwd) + ("\\" if len(self.cwd) == 1 else "")
 
-    def visit_dir(self, dir) -> RDET:
+    def open_directory(self, dir) -> RDET:
         # Di chuyển đến thư mục chỉ định và trả về RDET của nó
         if dir == "":
             return self.RDET
-        dirs = self.__parse_path(dir)
+        dirs = self.parse_path(dir)
         cdet = self.RDET
         for d in dirs:
             entry = cdet.find_entry(d)
@@ -341,17 +341,17 @@ class FAT32:
                 if entry.start_cluster == 0:
                     continue  # Bỏ qua thư mục gốc ảo
                 if entry.start_cluster not in self.DET:
-                    self.DET[entry.start_cluster] = RDET(self.get_all_cluster_data(entry.start_cluster))
+                    self.DET[entry.start_cluster] = RDET(self.read_cluster_chain(entry.start_cluster))
                 cdet = self.DET[entry.start_cluster]
             else:
                 raise NotADirectoryError(f"'{d}' is not a directory")
         return cdet
   
-    def get_dir(self, dir=""):
+    def list_directory(self, dir=""):
         # Lấy danh sách các entry trong thư mục hiện tại
         try:
-            cdet = self.visit_dir(dir)
-            entry_list = cdet.get_active_entries()
+            cdet = self.open_directory(dir)
+            entry_list = cdet.list_valid_entries()
             return [{
                 "Flags": entry.attr.value,
                 "Date Modified": entry.date_updated,
@@ -366,57 +366,48 @@ class FAT32:
         # Thay đổi thư mục làm việc hiện tại
         if not path:
             raise ValueError("Path required")
-        cdet = self.visit_dir(path)
+        cdet = self.open_directory(path)
         self.RDET = cdet
-        dirs = self.__parse_path(path)
+        dirs = self.parse_path(path)
         if dirs[0] == self.name:
             self.cwd = [self.name]
             dirs = dirs[1:]
         for d in dirs:
             self.cwd.append(d) if d != ".." else self.cwd.pop()
 
-    def get_all_cluster_data(self, cluster_index):
+    def read_cluster_chain(self, cluster_index):
         # Đọc toàn bộ dữ liệu từ chuỗi cluster
         index_list = self.FAT[0].get_cluster_chain(cluster_index)
         data = b""
         for i in index_list:
-            self.fd.seek(self.__offset_from_cluster(i) * self.BS)
+            self.fd.seek(self.offset_from_cluster(i) * self.BS)
             data += self.fd.read(self.SC * self.BS)
         return data
   
-    def get_text_file(self, path: str) -> str:
+    def read_text_file(self, path: str) -> str:
         # Đọc nội dung file văn bản
-        path_parts = self.__parse_path(path)
-        entry = self._find_entry(path_parts)
+        path_parts = self.parse_path(path)
+        entry = self.find_entry(path_parts)
         if not entry:
             raise FileNotFoundError("File not found")
         if entry.is_directory():
             raise IsADirectoryError("Is a directory")
-        return self._read_file_content(entry)
+        return self.read_file_content(entry)
 
-    # def get_file_content(self, path: str) -> bytes:
-    #     path_parts = self.__parse_path(path)
-    #     entry = self._find_entry(path_parts)
-    #     if not entry:
-    #         raise FileNotFoundError("File not found")
-    #     if entry.is_directory():
-    #         raise IsADirectoryError("Is a directory")
-    #     return self.get_all_cluster_data(entry.start_cluster)[:entry.size]
-
-    def _find_entry(self, path_parts):
+    def find_entry(self, path_parts):
         # Tìm entry theo đường dẫn
         if len(path_parts) > 1:
-            cdet = self.visit_dir("\\".join(path_parts[:-1]))
+            cdet = self.open_directory("\\".join(path_parts[:-1]))
             return cdet.find_entry(path_parts[-1])
         return self.RDET.find_entry(path_parts[0])
 
-    def _read_file_content(self, entry):
+    def read_file_content(self, entry):
         data = bytearray()
         remaining = entry.size
         for cluster in self.FAT[0].get_cluster_chain(entry.start_cluster):
             if remaining <= 0:
                 break
-            self.fd.seek(self.__offset_from_cluster(cluster) * self.BS)
+            self.fd.seek(self.offset_from_cluster(cluster) * self.BS)
             read_size = min(self.SC * self.BS, remaining)
             data.extend(self.fd.read(read_size))
             remaining -= read_size

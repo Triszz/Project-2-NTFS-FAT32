@@ -28,11 +28,11 @@ class Record:
     standard_info_start = int.from_bytes(self.raw_data[0x14:0x16], byteorder='little')
     standard_info_size = int.from_bytes(self.raw_data[standard_info_start + 4:standard_info_start + 8], byteorder='little')
     self.standard_info = {}
-    self.__parse_standard_info(standard_info_start)  # Phân tích thông tin chuẩn của bản ghi
+    self.parse_standard_info(standard_info_start)  # Phân tích thông tin chuẩn của bản ghi
     file_name_start = standard_info_start + standard_info_size
     file_name_size = int.from_bytes(self.raw_data[file_name_start + 4:file_name_start + 8], byteorder='little')
     self.file_name = {}
-    self.__parse_file_name(file_name_start) # Phân tích tên file của bản ghi
+    self.parse_file_name(file_name_start) # Phân tích tên file của bản ghi
     data_start = file_name_start + file_name_size
     data_sig = self.raw_data[data_start:data_start + 4]
     if data_sig[0] == 64:
@@ -41,7 +41,7 @@ class Record:
     data_sig = self.raw_data[data_start:data_start + 4]
     self.data = {}
     if data_sig[0] == 128:
-      self.__parse_data(data_start) # Phân tích dữ liệu file của bản ghi
+      self.parse_data(data_start) # Phân tích dữ liệu file của bản ghi
     elif data_sig[0] == 144:
       self.standard_info['flags'] |= NTFSAttribute.directory
       self.data['size'] = 0
@@ -80,7 +80,7 @@ class Record:
         record_list.append(record)
     return record_list
   
-  def __parse_data(self, start):
+  def parse_data(self, start):
     """Phân tích thuộc tính dữ liệu (DATA attribute)"""
     self.data = {'resident': False, 'size': 0}  # <-- Thêm dòng này
     
@@ -117,7 +117,7 @@ class Record:
         pass  # Hoặc xử lý tùy theo logic
 
 
-  def __parse_file_name(self, start):
+  def parse_file_name(self, start):
     sig = int.from_bytes(self.raw_data[start:start + 4], byteorder='little')
     if sig != 0x30:
       raise Exception("Skip this record")
@@ -129,12 +129,12 @@ class Record:
     
     self.file_name["parent_id"] = int.from_bytes(body[:6], byteorder='little')
     name_length = body[64]
-    self.file_name["long_name"] = self.__decode_filename(body[66:66 + name_length * 2])  # unicode
+    self.file_name["long_name"] = self.decode_filename(body[66:66 + name_length * 2])  # unicode
 
-  def __decode_filename(self, raw_bytes):
+  def decode_filename(self, raw_bytes):
     return raw_bytes.decode('utf-16le', errors='replace')  # Thêm xử lý lỗi
 
-  def __parse_standard_info(self, start):
+  def parse_standard_info(self, start):
     sig = int.from_bytes(self.raw_data[start:start + 4], byteorder='little')
     if sig != 0x10:
       raise Exception("Something Wrong!")
@@ -145,9 +145,9 @@ class Record:
     self.standard_info["flags"] = NTFSAttribute(int.from_bytes(self.raw_data[begin + 32:begin + 36], byteorder='little'))
     self.standard_info["created_time"] = as_datetime(int.from_bytes(self.raw_data[begin:begin+8], byteorder='little'))
     
-    self.__parse_flags(begin + 32)
+    self.parse_flags(begin + 32)
 
-  def __parse_flags(self, offset):
+  def parse_flags(self, offset):
       flags_value = int.from_bytes(self.raw_data[offset:offset+4], byteorder='little')
       self.standard_info["flags"] = NTFSAttribute(flags_value)
       # Xử lý riêng cờ DEVICE
@@ -163,17 +163,17 @@ class DirectoryTree:
     for node in nodes:
       self.nodes_dict[node.file_id] = node
 
-    self.__build_parent_child_links()
-    self.__find_root_node()
+    self.link_parent_child_nodes()
+    self.find_root_node()
 
-  def __build_parent_child_links(self):
+  def link_parent_child_nodes(self):
     """Xây dựng quan hệ parent-child giữa các bản ghi"""
     for node in self.nodes_dict.values():
         parent_id = node.file_name['parent_id']
         if parent_id in self.nodes_dict:
             self.nodes_dict[parent_id].childs.append(node)
 
-  def __find_root_node(self):
+  def find_root_node(self):
     for node in self.nodes_dict.values():
         if node.file_name['parent_id'] == node.file_id:
             self.root = node
@@ -240,7 +240,7 @@ class NTFS:
     try:
       self.boot_sector_raw = self.fd.read(0x200)  # Đọc boot sector (512 byte đầu tiên)
       self.boot_sector = {}
-      self.__extract_boot_sector()
+      self.parse_boot_sector()
       # Kiểm tra OEM_ID để xác định đúng NTFS
       if self.boot_sector["OEM_ID"] != b'NTFS    ':
         raise Exception("Not NTFS")
@@ -270,7 +270,7 @@ class NTFS:
       exit()
 
   @staticmethod
-  def check_ntfs(name: str):
+  def is_ntfs(name: str):
     try:
       with open(r'\\.\%s' % name, 'rb') as fd:
         oem_id = fd.read(0xB)[3:]
@@ -281,11 +281,11 @@ class NTFS:
       print(f"[ERROR] {e}")
       exit()
 
-  def __extract_boot_sector(self):
+  def parse_boot_sector(self):
     """Trích xuất thông tin từ boot sector NTFS"""
-    self.boot_sector.update(self.__read_boot_values())
+    self.boot_sector.update(self.get_boot_para())
 
-  def __read_boot_values(self):
+  def get_boot_para(self):
     clusters_per_record = int.from_bytes(
         self.boot_sector_raw[0x40:0x41], 
         'little', 
@@ -293,7 +293,7 @@ class NTFS:
     )
     return {
         'OEM_ID': self.boot_sector_raw[3:0xB],
-        'bytes_per_sector': self.__read_uint16(0xB),
+        'bytes_per_sector': self.read_uint16(0xB),
         'sectors_per_cluster': int.from_bytes(self.boot_sector_raw[0xD:0xE], 'little'),
         'reserved_sectors': int.from_bytes(self.boot_sector_raw[0xE:0x10], 'little'),
         'volume_size': int.from_bytes(self.boot_sector_raw[0x28:0x30], 'little'),
@@ -304,18 +304,18 @@ class NTFS:
         'serial_number': int.from_bytes(self.boot_sector_raw[0x48:0x50], 'little'),
         # 'Signature': self.boot_sector_raw[0x1FE:0x200],
     }
-  def __read_uint16(self, offset):
+  def read_uint16(self, offset):
     return int.from_bytes(self.boot_sector_raw[offset:offset+2], 'little')
 
 
-  def __parse_path(self, path):
+  def parse_path(self, path):
     dirs = re.sub(r"[/\\]+", r"\\", path).strip("\\").split("\\")
     return dirs
   
-  def visit_dir(self, path) -> Record:
+  def open_directory(self, path) -> Record:
     """Di chuyển đến thư mục chỉ định và trả về bản ghi thư mục"""
     # Xử lý đường dẫn dạng C:\Folder\Subfolder
-    dirs = self.__parse_path(path)
+    dirs = self.parse_path(path)
     cur_dir = self.dir_tree.current_dir
     # Tìm kiếm từng thành phần trong đường dẫn
     for d in dirs:
@@ -327,11 +327,11 @@ class NTFS:
           raise Exception(f"Directory '{d}' not found")
     return cur_dir
 
-  def get_dir(self, path = ""):
+  def list_directory(self, path = ""):
     """Lấy danh sách các entry trong thư mục"""
     try:
       if path != "":
-        next_dir = self.visit_dir(path)
+        next_dir = self.open_directory(path)
         if next_dir is None:
             return []  # Trả về danh sách rỗng nếu không tìm thấy
         record_list = next_dir.get_active_records()
@@ -361,10 +361,10 @@ class NTFS:
       raise Exception("Path to directory is required!")
     try:
       # Cập nhật biến current_dir và đường dẫn hiện tại (cwd)
-      next_dir = self.visit_dir(path)
+      next_dir = self.open_directory(path)
       self.dir_tree.current_dir = next_dir
 
-      dirs = self.__parse_path(path)
+      dirs = self.parse_path(path)
       if dirs[0] == self.name:
         self.cwd.clear()
         self.cwd.append(self.name)
@@ -377,46 +377,19 @@ class NTFS:
     except Exception as e:
       raise (e)
 
-  def get_cwd(self):
+  def current_path(self):
     if len(self.cwd) == 1:
       return self.cwd[0] + "\\"
     return "\\".join(self.cwd)
-  
-  # def get_file_content(self, path: str):
-  #   path = self.__parse_path(path)
-  #   if len(path) > 1:
-  #     name = path[-1]
-  #     path = "\\".join(path[:-1])
-  #     next_dir = self.visit_dir(path)
-  #     record = next_dir.find_record(name)
-  #   else:
-  #     record = self.dir_tree.find_record(path[0])
 
-  #   if record is None:
-  #     raise Exception("File doesn't exist")
-  #   if record.is_directory():
-  #     raise Exception("Is a directory")
-
-  #   if 'resident' not in record.data:
-  #     return b''
-  #   if record.data['resident']:
-  #     return record.data['content']
-  #   else:
-  #     real_size = record.data['size']
-  #     offset = record.data['cluster_offset'] * self.SC * self.BS
-  #     size = record.data['cluster_size'] * self.SC * self.BS
-  #     self.fd.seek(offset)
-  #     data = self.fd.read(min(size, real_size))
-  #     return data
-
-  def get_text_file(self, path: str) -> str:
+  def read_text_file(self, path: str) -> str:
     """Đọc nội dung file văn bản"""
-    path = self.__parse_path(path)
+    path = self.parse_path(path)
     try:
         if len(path) > 1:
             name = path[-1]
             path = "\\".join(path[:-1])
-            next_dir = self.visit_dir(path)
+            next_dir = self.open_directory(path)
             record = next_dir.find_record(name)
         else:
             record = self.dir_tree.find_record(path[0])
