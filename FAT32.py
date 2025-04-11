@@ -1,33 +1,8 @@
 from enum import Flag, auto
+from datetime import datetime
 from itertools import chain
 import re
 
-class FAT32DateTime:
-    """Lưu trữ và định dạng các thành phần thời gian"""
-    def __init__(self, year, month, day, hour=0, minute=0, second=0, microsecond=0):
-        """Khởi tạo đối tượng thời gian với các thành phần"""
-        self.year = year
-        self.month = month
-        self.day = day
-        self.hour = hour
-        self.minute = minute
-        self.second = second
-        self.microsecond = microsecond
-
-    def strftime(self, format_str):
-        """"Định dạng thời gian thành chuỗi theo mã format"""
-        return format_str \
-            .replace("%Y", f"{self.year:04}") \
-            .replace("%m", f"{self.month:02}") \
-            .replace("%d", f"{self.day:02}") \
-            .replace("%H", f"{self.hour:02}") \
-            .replace("%M", f"{self.minute:02}") \
-            .replace("%S", f"{self.second:02}") \
-            .replace("%f", f"{self.microsecond:06}")
-    
-    def date(self):
-        return self
-    
 class Attribute(Flag):
     """Lớp định nghĩa các thuộc tính file/thư mục trong FAT32"""
     read_only = 0x01    # File chỉ đọc
@@ -141,26 +116,12 @@ class RDET_entry:
         mon = (self.date_created_raw & 0b0000000111100000) >> 5
         day = self.date_created_raw & 0b0000000000011111
 
-        # self.date_created = datetime(year, mon, day, h, m, s, ms*10)
-        self.date_created = FAT32DateTime(
-            year=year,
-            month=mon,
-            day=day,
-            hour=h,
-            minute=m,
-            second=s,
-            microsecond=ms*10 
-        )
+        self.date_created = datetime(year, mon, day, h, m, s, ms*10)
 
     def _parse_last_accessed(self):
         self.last_accessed_raw = int.from_bytes(self.raw_data[0x12:0x14], 'little')
         date = self._parse_fat_date(self.last_accessed_raw)
-       # self.last_accessed = datetime(date['year'], date['month'], date['day'])
-        self.last_accessed = FAT32DateTime(
-            year=date['year'],   
-            month=date['month'],
-            day=date['day']
-        )
+        self.last_accessed = datetime(date['year'], date['month'], date['day'])
 
     def _parse_date_updated(self):
         self.time_updated_raw = int.from_bytes(self.raw_data[0x16:0x18], 'little')
@@ -174,15 +135,7 @@ class RDET_entry:
         mon = (self.date_updated_raw & 0b0000000111100000) >> 5
         day = self.date_updated_raw & 0b0000000000011111
 
-        #self.date_updated = datetime(year, mon, day, h, m, s)
-        self.date_updated = FAT32DateTime(
-            year=year,
-            month=mon,
-            day=day,
-            hour=h,
-            minute=m,
-            second=s
-        )
+        self.date_updated = datetime(year, mon, day, h, m, s)
 
     def _parse_fat_time(self, raw_time, include_ms=False):
         if include_ms:
