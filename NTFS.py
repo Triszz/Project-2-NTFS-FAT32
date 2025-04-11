@@ -1,5 +1,6 @@
 import re
 from enum import Flag, auto
+from datetime import datetime
 class NTFSAttribute(Flag):
     read_only = 0x0001  # File chỉ đọc
     hidden = 0x0002     # File ẩn
@@ -8,64 +9,9 @@ class NTFSAttribute(Flag):
     archieve = 0x0020   # File đã được archive 
     device = 0x0040     # Thiết bị
     
-    
-class NTFSDateTime:
-    """Lớp xử lý chuyển đổi timestamp NTFS sang các thành phần ngày/tháng/năm/giờ"""
-    def __init__(self, ntfs_timestamp: int):
-        # Chuyển đổi timestamp NTFS (100-ns từ 1601-01-01) sang Unix timestamp
-        unix_seconds = (ntfs_timestamp - 116444736000000000) // 10000000
-        self.microsecond = (ntfs_timestamp % 10000000) // 10
-        
-        # Tính toán các thành phần thời gian
-        self.days_since_epoch = unix_seconds // 86400
-        remaining_seconds = unix_seconds % 86400
-        
-        self.hour = remaining_seconds // 3600
-        remaining_seconds %= 3600
-        self.minute = remaining_seconds // 60
-        self.second = remaining_seconds % 60
-        
-        # Tính toán ngày tháng năm từ Unix epoch (1970-01-01)
-        year = 1970
-        days = self.days_since_epoch
-        while True:
-            leap = 1 if self.__is_leap(year) else 0
-            days_in_year = 365 + leap
-            if days < days_in_year:
-                break
-            days -= days_in_year
-            year += 1
-        
-        self.year = year
-        month_days = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        month = 0
-        while month < 12 and days >= month_days[month]:
-            days -= month_days[month]
-            month += 1
-        
-        self.month = month + 1
-        self.day = days + 1
-
-    def __is_leap(self, year: int) -> bool:
-        """Kiểm tra năm nhuận"""
-        return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
-
-    def strftime(self, format_str: str) -> str:
-        """Định dạng thời gian thành chuỗi."""
-        replacements = {
-            '%Y': f"{self.year:04}",
-            '%m': f"{self.month:02}",
-            '%d': f"{self.day:02}",
-            '%H': f"{self.hour:02}",
-            '%M': f"{self.minute:02}",
-            '%S': f"{self.second:02}",
-            '%f': f"{self.microsecond:06}"
-        }
-        # Thay thế từng thành phần trong chuỗi format
-        for fmt, val in replacements.items():
-            format_str = format_str.replace(fmt, val)
-        return format_str
-
+def as_datetime(timestamp):
+  """Chuyển đổi timestamp NTFS (100-ns intervals từ 1601-01-01) sang datetime"""
+  return datetime.fromtimestamp((timestamp - 116444736000000000) // 10000000)
 
 class Record:
   """Lớp đại diện cho một bản ghi MFT (Master File Table)"""
@@ -194,12 +140,10 @@ class Record:
       raise Exception("Something Wrong!")
     offset = int.from_bytes(self.raw_data[start + 20:start + 21], byteorder='little')
     begin = start + offset
-    #self.standard_info["created_time"] = as_datetime(int.from_bytes(self.raw_data[begin:begin + 8], byteorder='little'))
-    #self.standard_info["last_modified_time"] = as_datetime(int.from_bytes(self.raw_data[begin + 8:begin + 16], byteorder='little'))
-    # Thay thế as_datetime bằng NTFSDateTime
-    self.standard_info["created_time"] = NTFSDateTime(int.from_bytes(self.raw_data[begin:begin + 8], byteorder='little'))
-    self.standard_info["last_modified_time"] = NTFSDateTime(int.from_bytes(self.raw_data[begin + 8:begin + 16], byteorder='little'))
+    self.standard_info["created_time"] = as_datetime(int.from_bytes(self.raw_data[begin:begin + 8], byteorder='little'))
+    self.standard_info["last_modified_time"] = as_datetime(int.from_bytes(self.raw_data[begin + 8:begin + 16], byteorder='little'))
     self.standard_info["flags"] = NTFSAttribute(int.from_bytes(self.raw_data[begin + 32:begin + 36], byteorder='little'))
+    self.standard_info["created_time"] = as_datetime(int.from_bytes(self.raw_data[begin:begin+8], byteorder='little'))
     
     self.__parse_flags(begin + 32)
 
