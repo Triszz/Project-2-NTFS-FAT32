@@ -57,7 +57,7 @@ class DiskAnalyzerApp:
         main_pane.add(right_pane)
 
         # Metadata panel (top 30%)
-        info_frame = ttk.LabelFrame(right_pane, text="Metadata")
+        info_frame = ttk.LabelFrame(right_pane, text="Properties")
         right_pane.add(info_frame, height=200, sticky='nsew') # Tự động co giãn theo tỷ lệ khi resize cửa sổ
 
         self.info_text = tk.Text(info_frame, wrap=tk.WORD, font=('Consolas', 10))
